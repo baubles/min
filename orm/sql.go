@@ -84,7 +84,7 @@ type rawSql struct {
 	tokens  []string
 	rawSql  string
 
-	conn DB
+	conn SqlQuerier
 	stmt *sql.Stmt
 }
 
@@ -312,7 +312,7 @@ func (s *rawSql) build() {
 }
 
 func getValue(root interface{}, field string) (interface{}, error) {
-	return ReflectGetValue(root, field)
+	return reflectGetValue(root, field)
 }
 
 func (s *rawSql) parseToken(str, openToken, closeToken string) (string, []string) {
@@ -609,7 +609,7 @@ func (s *rawSql) Close() error {
 	return err
 }
 
-func ReflectGetValue(root interface{}, property string) (interface{}, error) {
+func reflectGetValue(root interface{}, property string) (interface{}, error) {
 	rootValue := reflect.ValueOf(root)
 	if rootValue.Kind() == reflect.Ptr {
 		rootValue = rootValue.Elem()
