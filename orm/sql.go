@@ -47,6 +47,7 @@ type Sql interface {
 	SqlString() string
 	Prepare() error
 	Exec(args interface{}) (int64, error)
+	QueryValue(args interface{}, value interface{}) error
 	QueryRow(args interface{}, row interface{}) error
 	QueryRows(args interface{}, rows interface{}) (int64, error)
 	Close() error
@@ -349,14 +350,16 @@ func (s *rawSql) handleToken(token string) string {
 
 func (s *rawSql) parseArgs(args interface{}) []interface{} {
 	var buildArgs []interface{}
-	switch reflect.ValueOf(args).Kind() {
-	case reflect.Array, reflect.Slice:
-		return args.([]interface{})
-	default:
-		for _, token := range s.tokens {
-			v, ok := getValue(args, token)
-			if ok == nil {
-				buildArgs = append(buildArgs, v)
+	if args != nil {
+		switch reflect.ValueOf(args).Kind() {
+		case reflect.Array, reflect.Slice:
+			return args.([]interface{})
+		default:
+			for _, token := range s.tokens {
+				v, ok := getValue(args, token)
+				if ok == nil {
+					buildArgs = append(buildArgs, v)
+				}
 			}
 		}
 	}
@@ -412,8 +415,13 @@ func (s *rawSql) QueryRow(args interface{}, row interface{}) error {
 	if err != nil {
 		return err
 	}
-	typ := reflect.TypeOf(row)
+	defer sqlRows.Close()
 
+	if row == nil {
+		return err
+	}
+
+	typ := reflect.TypeOf(row)
 	if typ.Kind() != reflect.Ptr || (typ.Elem().Kind() != reflect.Struct && typ.Elem().Kind() != reflect.Map) {
 		return errors.New("[database.sql] rows must be ptr of map or struct")
 	}
@@ -432,18 +440,52 @@ func (s *rawSql) QueryRow(args interface{}, row interface{}) error {
 	}
 }
 
+func (s *rawSql) QueryValue(args interface{}, value interface{}) error {
+	sqlRows, err := s.query(args)
+	if err != nil {
+		return err
+	}
+	defer sqlRows.Close()
+
+	if value == nil {
+		return err
+	}
+
+	if sqlRows.Next() {
+		rowVals, err := s.scanRow(sqlRows, 1)
+		if err != nil {
+			return err
+		}
+		s.setFieldValue(reflect.Indirect(reflect.ValueOf(value)), rowVals[0])
+		return nil
+	} else {
+		return ErrNoRows
+	}
+}
+
 func (s *rawSql) QueryRows(args interface{}, rows interface{}) (int64, error) {
 	sqlRows, err := s.query(args)
 	if err != nil {
 		return int64(0), err
 	}
+	defer sqlRows.Close()
+
 	return s.parseRows(sqlRows, rows, -1)
 }
 
 func (s *rawSql) parseRows(sqlRows *sql.Rows, rowsPtr interface{}, limit int32) (int64, error) {
+	var (
+		num = int64(0)
+	)
+	if rowsPtr == nil {
+		for sqlRows.Next() && limit != 0 {
+			num = num + 1
+		}
+		return num, nil
+	}
+
 	val := reflect.ValueOf(rowsPtr)
 	ind := reflect.Indirect(val)
-	num := int64(0)
 	if val.Kind() != reflect.Ptr || ind.Kind() != reflect.Slice {
 		return num, errors.New("[database.sql] rows must be ptr slice")
 	}
