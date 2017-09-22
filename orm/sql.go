@@ -21,6 +21,8 @@ const (
 	_SELECT_STATEMENT
 )
 
+type SqlParams map[string]interface{}
+
 type Sql interface {
 	Update(table string) Sql
 	Set(set string) Sql
